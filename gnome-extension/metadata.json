@@ -1,0 +1,10 @@
+{
+  "uuid": "claude-tray@aloushek.github.io",
+  "name": "Claude Tray",
+  "description": "Monitor active Claude Code sessions in the top panel — shows session count, working/waiting status, and lets you resume or launch new sessions.",
+  "shell-version": ["46"],
+  "version": 1,
+  "url": "https://github.com/Aloushek/Claude-Tray",
+  "settings-schema": "org.gnome.shell.extensions.claude-tray",
+  "gettext-domain": "claude-tray"
+}

@@ -1,0 +1,83 @@
+/* Claude Tray — GNOME Shell extension styles */
+
+.claude-tray-panel-box {
+  spacing: 4px;
+}
+
+.claude-tray-icon {
+  icon-size: 16px;
+}
+
+.claude-tray-count {
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.claude-tray-count-zero {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.claude-tray-count-active {
+  color: white;
+}
+
+.claude-tray-count-waiting {
+  color: #ef4444;
+}
+
+.claude-tray-count-working {
+  color: #f97316;
+}
+
+/* Dropdown menu items */
+.claude-tray-session-item {
+  spacing: 8px;
+}
+
+.claude-tray-session-cwd {
+  font-size: 11px;
+}
+
+.claude-tray-session-meta {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.claude-tray-status-waiting {
+  color: #ef4444;
+}
+
+.claude-tray-status-working {
+  color: #f97316;
+}
+
+.claude-tray-status-thinking {
+  color: #f97316;
+}
+
+.claude-tray-status-idle {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+/* Action buttons row */
+.claude-tray-actions-box {
+  spacing: 6px;
+  padding: 2px 0 4px 0;
+}
+
+.claude-tray-action-btn {
+  border-radius: 24px;
+  padding: 8px;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Usage stats */
+.claude-tray-usage-box {
+  spacing: 1px;
+}
+
+.claude-tray-usage-line {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.5);
+}

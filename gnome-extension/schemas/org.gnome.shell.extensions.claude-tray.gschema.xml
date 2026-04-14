@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.claude-tray"
+          path="/org/gnome/shell/extensions/claude-tray/">
+
+    <key type="as" name="shortcut-new-session">
+      <default>['&lt;Super&gt;k']</default>
+      <summary>Keyboard shortcut to open a new Claude Code session</summary>
+      <description>Keyboard shortcut that launches a new Claude Code terminal in the home directory.</description>
+    </key>
+
+    <key type="s" name="terminal-command">
+      <default>'kitty'</default>
+      <summary>Terminal emulator command</summary>
+      <description>Terminal command used to launch new Claude Code sessions (e.g. kitty, gnome-terminal, alacritty).</description>
+    </key>
+
+    <key type="s" name="new-session-cwd">
+      <default>''</default>
+      <summary>Working directory for new sessions</summary>
+      <description>Directory where new Claude Code sessions are opened. Empty means $HOME.</description>
+    </key>
+
+    <key type="i" name="refresh-interval-seconds">
+      <default>5</default>
+      <range min="1" max="60"/>
+      <summary>Session refresh interval (seconds)</summary>
+      <description>How often to poll session state and verify PIDs are alive.</description>
+    </key>
+
+    <key type="b" name="show-desktop-notifications">
+      <default>true</default>
+      <summary>Show desktop notifications</summary>
+      <description>Whether to show desktop notifications when Claude Code is waiting for your input.</description>
+    </key>
+
+    <key type="b" name="notify-on-thinking-done">
+      <default>false</default>
+      <summary>Notify when Claude finishes thinking</summary>
+      <description>Whether to show a notification when a session transitions from working to idle.</description>
+    </key>
+
+  </schema>
+</schemalist>

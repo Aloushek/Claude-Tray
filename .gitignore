@@ -1,0 +1,6 @@
+.idea/
+*.zip
+node_modules/
+*.swp
+*.bak
+gnome-extension/schemas/gschemas.compiled
