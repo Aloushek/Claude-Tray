@@ -84,6 +84,24 @@ export default class ClaudeTrayPreferences extends ExtensionPreferences {
         settings.bind('notify-on-thinking-done', thinkingDoneRow, 'active', Gio.SettingsBindFlags.DEFAULT);
         notifyGroup.add(thinkingDoneRow);
 
+        // History group
+        const historyGroup = new Adw.PreferencesGroup({
+            title: _('Session History'),
+        });
+        page.add(historyGroup);
+
+        const historyCountRow = new Adw.SpinRow({
+            title: _('Recent sessions to show'),
+            subtitle: _('Number of ended sessions shown in the dropdown. Set to 0 to disable.'),
+            adjustment: new Gtk.Adjustment({
+                lower: 0,
+                upper: 50,
+                step_increment: 1,
+            }),
+        });
+        settings.bind('history-count', historyCountRow, 'value', Gio.SettingsBindFlags.DEFAULT);
+        historyGroup.add(historyCountRow);
+
         // Polling group
         const pollingGroup = new Adw.PreferencesGroup({
             title: _('Performance'),

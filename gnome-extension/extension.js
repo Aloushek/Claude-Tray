@@ -29,6 +29,7 @@ export default class ClaudeTrayExtension extends Extension {
         // Start monitoring with current refresh interval
         const interval = this._settings.get_int('refresh-interval-seconds');
         this._monitor.start(interval);
+        this._monitor.setMaxHistory(this._settings.get_int('history-count'));
 
         // Connect session change events to indicator updates
         this._monitorCallbackId = this._monitor.connect(sessions => {
@@ -39,6 +40,11 @@ export default class ClaudeTrayExtension extends Extension {
         this._settings.connect('changed::refresh-interval-seconds', () => {
             this._monitor.stop();
             this._monitor.start(this._settings.get_int('refresh-interval-seconds'));
+        });
+
+        // Update history limit when setting changes
+        this._settings.connect('changed::history-count', () => {
+            this._monitor.setMaxHistory(this._settings.get_int('history-count'));
         });
 
         // Register Super+K keybinding for new Claude session

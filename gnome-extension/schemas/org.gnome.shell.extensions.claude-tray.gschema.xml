@@ -40,5 +40,12 @@
       <description>Whether to show a notification when a session transitions from working to idle.</description>
     </key>
 
+    <key type="i" name="history-count">
+      <default>5</default>
+      <range min="0" max="50"/>
+      <summary>Number of recent sessions to show</summary>
+      <description>How many ended sessions to keep in the Recent section. Set to 0 to disable history.</description>
+    </key>
+
   </schema>
 </schemalist>

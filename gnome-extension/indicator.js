@@ -56,15 +56,6 @@ function shortenPath(fullPath) {
     return p;
 }
 
-// Format rate limit window: "45%" or "45% (in 1h20m)"
-function formatRateLimit(window) {
-    if (!window) return '?';
-    const pct = window.percent !== undefined ? `${Math.round(window.percent)}%` : '?';
-    // Try various field names Claude Code might use for remaining time
-    const remaining = window.remainingTime || window.resetIn || window.resets_in || window.reset_in || null;
-    if (remaining) return `${pct} (in ${remaining})`;
-    return pct;
-}
 
 export const ClaudeTrayIndicator = GObject.registerClass(
 class ClaudeTrayIndicator extends PanelMenu.Button {
@@ -72,8 +63,12 @@ class ClaudeTrayIndicator extends PanelMenu.Button {
         super._init(0.5, 'Claude Tray');
         this._extension = extension;
         this._sessions = [];
+        this._history = [];
         this._notificationSource = null;
         this._notifiedWaiting = new Set();  // sessionIds we already notified about
+        this._timeLabelUpdaters = [];        // functions to call each live-timer tick
+        this._liveTimerId = null;
+        this._tooltipLabel = null;           // shared floating tooltip label
 
         // Panel box: icon + count label
         const box = new St.BoxLayout({
@@ -99,9 +94,52 @@ class ClaudeTrayIndicator extends PanelMenu.Button {
 
         this.add_child(box);
         this._buildMenu();
+
+        // Start/stop 1-second live-update timer based on menu visibility.
+        // Also force a refresh on open — catches stale state after shell restart.
+        this.menu.connect('open-state-changed', (_menu, isOpen) => {
+            if (isOpen) {
+                this._monitor?.refresh();
+                this._startLiveTimer();
+            } else {
+                this._stopLiveTimer();
+            }
+        });
+    }
+
+    _startLiveTimer() {
+        this._stopLiveTimer();
+        this._liveTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1, () => {
+            for (const update of this._timeLabelUpdaters) update();
+            return GLib.SOURCE_CONTINUE;
+        });
+    }
+
+    _stopLiveTimer() {
+        if (this._liveTimerId !== null) {
+            GLib.Source.remove(this._liveTimerId);
+            this._liveTimerId = null;
+        }
+    }
+
+    _showTooltip(text) {
+        if (!text) return;
+        if (!this._tooltipLabel) {
+            this._tooltipLabel = new St.Label({style_class: 'tooltip-label dash-label'});
+            global.stage.add_child(this._tooltipLabel);
+        }
+        this._tooltipLabel.text = text;
+        const [x, y] = global.get_pointer();
+        this._tooltipLabel.set_position(x + 14, y - 32);
+        this._tooltipLabel.show();
+    }
+
+    _hideTooltip() {
+        this._tooltipLabel?.hide();
     }
 
     _buildMenu() {
+        this._timeLabelUpdaters = [];
         this.menu.removeAll();
 
         // Header (non-clickable title)
@@ -131,9 +169,42 @@ class ClaudeTrayIndicator extends PanelMenu.Button {
             }
         }
 
+        // Recent (history) section
+        const historyCount = this._settings?.get_int('history-count') ?? 5;
+        if (historyCount > 0 && this._history.length > 0) {
+            this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem('Recent'));
+            for (const entry of this._history) {
+                this._addHistoryItem(entry);
+            }
+        }
+
+        // Usage bars — own row above buttons
+        const rateLimitsData = this._monitor?.getRateLimits?.();
+        const rl = rateLimitsData?.rate_limits;
+        const w5h = rl?.['5h'];
+        const w7d = rl?.['7d'];
+
+        if (w5h != null || w7d != null) {
+            this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            const usageItem = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
+            usageItem.remove_all_children();
+
+            const usageBox = new St.BoxLayout({
+                vertical: true,
+                x_expand: true,
+                style_class: 'claude-tray-usage-box',
+            });
+
+            if (w5h != null) usageBox.add_child(this._createRateBar('5h', w5h));
+            if (w7d != null) usageBox.add_child(this._createRateBar('7d', w7d));
+
+            usageItem.add_child(usageBox);
+            this.menu.addMenuItem(usageItem);
+        }
+
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Action buttons row — round icons like Vitals
+        // Action buttons row
         const actionsItem = new PopupMenu.PopupBaseMenuItem({reactive: false, can_focus: false});
         actionsItem.remove_all_children();
 
@@ -162,40 +233,6 @@ class ClaudeTrayIndicator extends PanelMenu.Button {
         );
         actionsBox.add_child(prefsBtn);
 
-        // Usage stats — right side of the actions row
-        const rl = this._monitor?.getRateLimits?.()?.rate_limits;
-        if (rl) {
-            // Spacer pushes usage to the right
-            const spacer = new St.Widget({x_expand: true});
-            actionsBox.add_child(spacer);
-
-            const usageBox = new St.BoxLayout({
-                vertical: true,
-                y_align: Clutter.ActorAlign.CENTER,
-                style_class: 'claude-tray-usage-box',
-            });
-
-            const w5h = rl['5h'];
-            const w7d = rl['7d'];
-
-            if (w5h !== undefined) {
-                usageBox.add_child(new St.Label({
-                    text: `5h: ${formatRateLimit(w5h)}`,
-                    style_class: 'claude-tray-usage-line',
-                }));
-            }
-            if (w7d !== undefined) {
-                usageBox.add_child(new St.Label({
-                    text: `7d: ${formatRateLimit(w7d)}`,
-                    style_class: 'claude-tray-usage-line',
-                }));
-            }
-
-            if (w5h !== undefined || w7d !== undefined) {
-                actionsBox.add_child(usageBox);
-            }
-        }
-
         actionsItem.add_child(actionsBox);
         this.menu.addMenuItem(actionsItem);
     }
@@ -213,6 +250,97 @@ class ClaudeTrayIndicator extends PanelMenu.Button {
         if (tooltip) button.accessible_name = tooltip;
         button.connect('clicked', onClick);
         return button;
+    }
+
+    _createRateBar(windowLabel, window) {
+        const pct = window.percent != null ? Math.round(window.percent) : 0;
+        const pctClamped = Math.max(0, Math.min(100, pct));
+
+        // Color: green → orange → red as usage grows
+        let fillColor;
+        if (pct < 50)       fillColor = 'rgba(74, 222, 128, 0.85)';
+        else if (pct < 80)  fillColor = 'rgba(249, 115, 22, 0.85)';
+        else                fillColor = 'rgba(239, 68, 68, 0.85)';
+
+        // Compute tooltip text for reset time
+        let rstTooltip = '';
+        if (window.resets_at) {
+            const secLeft = Math.floor(window.resets_at - Date.now() / 1000);
+            if (secLeft > 0) {
+                const h = Math.floor(secLeft / 3600);
+                const m = Math.floor((secLeft % 3600) / 60);
+                const timeStr = h > 0 ? (m > 0 ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
+                rstTooltip = `Usage window resets in ${timeStr}`;
+            } else {
+                rstTooltip = 'Usage window resetting soon';
+            }
+        }
+
+        // Row: "5h" label | track bar | "26%" label
+        const row = new St.BoxLayout({
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'margin: 2px 0;',
+        });
+
+        row.add_child(new St.Label({
+            text: windowLabel,
+            style_class: 'claude-tray-usage-line',
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'min-width: 2em;',
+        }));
+
+        // Track: dark background strip
+        const track = new St.Widget({
+            x_expand: true,
+            y_align: Clutter.ActorAlign.CENTER,
+            reactive: rstTooltip !== '',
+            style: `
+                height: 8px;
+                background-color: rgba(255,255,255,0.12);
+                border-radius: 4px;
+                margin: 0 6px;
+            `,
+        });
+
+        // Fill: coloured portion — width updated on track allocation
+        const fill = new St.Widget({
+            style: `
+                height: 8px;
+                background-color: ${fillColor};
+                border-radius: 4px;
+            `,
+            x_expand: false,
+            y_expand: false,
+        });
+        fill.set_position(0, 0);
+        track.layout_manager = new Clutter.FixedLayout();
+        track.add_child(fill);
+
+        track.connect('notify::width', () => {
+            const w = Math.round(track.width * pctClamped / 100);
+            fill.set_size(Math.max(0, w), 8);
+        });
+
+        // Tooltip: show reset time on hover via notify::hover
+        if (rstTooltip) {
+            track.track_hover = true;
+            track.connect('notify::hover', () => {
+                if (track.hover) this._showTooltip(rstTooltip);
+                else this._hideTooltip();
+            });
+        }
+
+        row.add_child(track);
+
+        row.add_child(new St.Label({
+            text: `${pct}%`,
+            style_class: 'claude-tray-usage-line',
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'min-width: 3em; text-align: right;',
+        }));
+
+        return row;
     }
 
     _addSessionItem(session) {
@@ -233,20 +361,29 @@ class ClaudeTrayIndicator extends PanelMenu.Button {
         });
         box.add_child(statusIcon);
 
-        // Path + status text
+        // Text block: title (or cwd if no title), then cwd + status meta
         const textBox = new St.BoxLayout({vertical: true, x_expand: true});
-        const cwdLabel = new St.Label({
-            text: shortenPath(session.cwd),
+
+        const primaryLabel = new St.Label({
+            text: session.title ? session.title : shortenPath(session.cwd),
             style_class: 'claude-tray-session-cwd',
         });
-        textBox.add_child(cwdLabel);
+        textBox.add_child(primaryLabel);
 
-        const statusAge = session.statusChangedAt ? formatAge(session.statusChangedAt) : '?';
-        const sessionAge = formatAge(session.startedAt);
+        // Secondary line: cwd (if title shown above) + status age
         const metaLabel = new St.Label({
-            text: `${STATUS_LABEL[session.status]} ${statusAge}  ·  started ${sessionAge} ago`,
+            text: '',
             style_class: 'claude-tray-session-meta',
         });
+        const updateMeta = () => {
+            const statusAge = session.statusChangedAt ? formatAge(session.statusChangedAt) : '?';
+            const sessionAge = formatAge(session.startedAt);
+            const cwdPart = session.title ? `${shortenPath(session.cwd)}  ·  ` : '';
+            const ctxPart = session.ctxPct != null ? `  ·  ctx:${Math.round(session.ctxPct)}%` : '';
+            metaLabel.text = `${cwdPart}${STATUS_LABEL[session.status]} ${statusAge}  ·  started ${sessionAge} ago${ctxPart}`;
+        };
+        updateMeta();
+        this._timeLabelUpdaters.push(updateMeta);
         textBox.add_child(metaLabel);
         box.add_child(textBox);
 
@@ -256,11 +393,64 @@ class ClaudeTrayIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(item);
     }
 
+    _addHistoryItem(entry) {
+        const item = new PopupMenu.PopupMenuItem('');
+        item.remove_all_children();
+
+        const box = new St.BoxLayout({
+            style_class: 'claude-tray-session-item',
+            x_expand: true,
+        });
+
+        // Status icon (muted — session is over)
+        const statusIcon = new St.Label({
+            text: '⏸',
+            style_class: 'claude-tray-status-idle',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        box.add_child(statusIcon);
+
+        // Line 1: title (if available) or cwd
+        const textBox = new St.BoxLayout({vertical: true, x_expand: true});
+        textBox.add_child(new St.Label({
+            text: entry.title ? entry.title : shortenPath(entry.cwd),
+            style_class: 'claude-tray-session-cwd',
+        }));
+
+        // Line 2: cwd on its own line (only when title shown above)
+        if (entry.title) {
+            textBox.add_child(new St.Label({
+                text: shortenPath(entry.cwd),
+                style_class: 'claude-tray-session-meta',
+            }));
+        }
+
+        // Line 3 (or 2 when no title): ended-ago, live
+        const metaLabel = new St.Label({
+            text: '',
+            style_class: 'claude-tray-session-meta',
+        });
+        const updateMeta = () => {
+            metaLabel.text = `ended ${formatAge(entry.endedAt)} ago`;
+        };
+
+        updateMeta();
+        this._timeLabelUpdaters.push(updateMeta);
+        textBox.add_child(metaLabel);
+        box.add_child(textBox);
+
+        item.add_child(box);
+
+        item.connect('activate', () => this._resumeHistoryEntry(entry));
+        this.menu.addMenuItem(item);
+    }
+
     // Update sessions data and re-render
     updateSessions(sessionsMap, settings, monitor) {
         this._settings = settings;
         this._monitor = monitor;
         this._sessions = Array.from(sessionsMap.values());
+        this._history = monitor?.getHistory?.() ?? [];
         this._updatePanel();
         this._buildMenu();
         this._handleNotifications();
@@ -363,6 +553,19 @@ class ClaudeTrayIndicator extends PanelMenu.Button {
         }
     }
 
+    _resumeHistoryEntry(entry) {
+        const terminal = this._settings?.get_string('terminal-command') || 'kitty';
+        const cmd = [terminal, '-e', 'bash', '-c',
+            `cd '${entry.cwd}' && claude --resume '${entry.sessionId}' || claude`];
+        try {
+            GLib.spawn_async(null, cmd, null,
+                GLib.SpawnFlags.SEARCH_PATH | GLib.SpawnFlags.DO_NOT_REAP_CHILD,
+                null);
+        } catch (e) {
+            console.error(`[Claude-Tray] Failed to resume history entry: ${e.message}`);
+        }
+    }
+
     /**
      * Walk the process tree from pid upward until we find a PID that owns
      * an X11 window. Returns the window ID as a hex string, or null.
@@ -423,6 +626,11 @@ class ClaudeTrayIndicator extends PanelMenu.Button {
     }
 
     destroy() {
+        this._stopLiveTimer();
+        if (this._tooltipLabel) {
+            this._tooltipLabel.destroy();
+            this._tooltipLabel = null;
+        }
         super.destroy();
     }
 });
