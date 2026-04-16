@@ -26,7 +26,7 @@ A GNOME Shell extension that monitors active [Claude Code](https://claude.ai/cod
 git clone https://github.com/Aloushek/Claude-Tray.git
 cd Claude-Tray
 ./scripts/install.sh
-./hooks/install-hooks.shV
+./hooks/install-hooks.sh
 
 # On X11: Alt+F2 → r → Enter to restart GNOME Shell
 # On Wayland: log out and back in
