@@ -216,6 +216,8 @@ export class SessionMonitor {
             });
         }
 
+        const now = Date.now();
+
         // Apply notification states
         const notifFiles = this._listJsonFiles(this._notificationsDir);
         for (const { path } of notifFiles) {
@@ -260,7 +262,6 @@ export class SessionMonitor {
         // Propagate statusChangedAt: preserve from previous session if status unchanged,
         // set to now if status changed, set to startedAt for brand new sessions.
         const prevSessions = this._sessions;
-        const now = Date.now();
         for (const [id, session] of newSessions) {
             const prev = prevSessions.get(id);
             if (!prev) {
